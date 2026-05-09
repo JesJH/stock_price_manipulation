@@ -1,12 +1,12 @@
 Background:
-The business was seeing an uptick of instances where brokerage customer accounts were hacked, and their funds were used to pump up the stock price of stocks.
+A brokerage business was seeing an uptick of instances where brokerage customer accounts were hacked, and their funds were used to pump up the stock price of stocks.
 These unauthorized transactions lead to financial losses for the brokerage.
 
 Business Goal:
 Place systematic blocks on these securities to not allow trading of equities most likely to be used for pump and dump stock price manipulation.
 
 Data Provided:
-The business provided a list of customers (~20) over a 5 month period, whose accounts were taken over and whose funds were used to pump stock prices.
+The brokerage provided a list of customers (~20) over a 5 month period, whose accounts were taken over and whose funds were used to pump stock prices.
 There isn't a systematic way to flag these customers and the underlying security currently.
 
 Considerations:
