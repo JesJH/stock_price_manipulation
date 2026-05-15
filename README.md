@@ -6,7 +6,7 @@ Replaced a rule-based fraud detection system with a machine learning pipeline to
 
 ## Background
 
-A brokerage firm was experiencing an increasing number of account takeover (ATO) incidents where compromised customer accounts were used to artificially inflate stock prices — a classic pump-and-dump scheme. These unauthorized transactions resulted in direct financial losses for the brokerage and its customers.
+A brokerage firm was experiencing an increasing number of account takeover (ATO) incidents in which compromised customer accounts were used to artificially inflate the price of a target security. Once the price was elevated, the fraudster — who held a pre-existing position in that security in their own account — would sell their shares at the inflated price, profiting at the expense of the brokerage and its customers. These pump-and-dump schemes resulted in direct financial losses with no systematic way to reliably detect the targeted securities in advance.
 
 The existing detection system relied on a simple rule-based approach using only three customer-level signals: account age, account value, and trade frequency over a fixed window. While interpretable, this approach lacked the breadth to reliably identify the securities being targeted, leaving significant fraud exposure unaddressed.
 
