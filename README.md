@@ -59,11 +59,32 @@ All transformations were encapsulated in a reusable feature transformation class
 
 The solution required two models working in sequence:
 
-**Model 1 — K-Means Clustering (negative selection)**
-To ensure true negatives were meaningfully comparable to confirmed fraud cases, K-Means was used to cluster securities on their D-90 to D-5 behavior. True negatives were selected from the same clusters as the true positives — meaning the classification model would need to learn genuine behavioral differences, not just distinguish unrelated securities. True negatives were downsampled within clusters to keep the training set challenging but tractable.
+#### Model 1 — Centroid-based True Negative Selection
+Since we are working with imbalanced data, we needed some ways to downsample the true negative dataset to ensure the model doesn't predict all securities as true negative.
 
-**Model 2 — Decision Tree (classification)**
-A Decision Tree classifier was trained on the curated dataset to distinguish manipulated securities from non-manipulated ones. The 80/20 split (16 TPs for training, 4 for testing) was used throughout. Decision trees were favored for their interpretability, which was important for explaining flagged securities to the fraud review team.
+To ensure true negatives were meaningfully comparable to confirmed fraud cases, each of the 20 TP securities was treated as its own centroid. All candidate TN securities were assigned to their nearest TP centroid based on D-90 to D-5 behavioral characteristics, so the classifier would need to learn genuine behavioral differences rather than simply distinguish unrelated securities.
+
+Three downsampling methods were evaluated:
+
+- **Random sampling** — 
+for each TP centroid, N TNs are drawn randomly from the assigned pool. This serves as a baseline. Hyperparameters: TN/TP ratio. It makes no assumption about match quality, which risks including TNs that are trivially different from the TP and inflate apparent classifier performance.
+
+- **Distance-ranked sampling** — 
+TNs are ranked by Euclidean distance to their assigned TP centroid in D-90 to D-5 feature space, and the N closest are selected. Hyperparameters: N per centroid, an optional maximum distance cutoff. This optimizes for match quality. The selected TNs are the most behaviorally similar to the TP, forcing the classifier to learn subtle distinctions of securities that are similar in nature, rather than broad ones.
+
+- **Stratified-by-distance sampling** — 
+TNs are assigned to equal-count quantile bins (e.g., quartiles, quintiles, or deciles) based on their distance to the TP centroid, then sampled from each bin. Using quantile bins rather than named bands ensures each bin contains a roughly equal number of TNs regardless of how distances distribute within a cluster. Hyperparameters: number of bins Q, per-bin sampling weight (uniform or closer-weighted), and total ratio. This optimizes for training diversity — exposing the classifier to both near-boundary hard cases and clearly distinct easy cases, which typically produces a more robust decision boundary.
+
+    Because Euclidean distance is sensitive to feature scale, all features must be normalized before distance computation. Robust scaling (median / IQR) is preferred over z-score given the likelihood of outliers in price and volume features. The scaler must be fit on the training fold only within each CV iteration to prevent test data from leaking into the distance calculation.
+
+Model 1 has no intrinsic performance metric. The optimal configuration — method, ratio, and distance cutoff — is selected via a grid search evaluated on Model 2's held-out performance. Because Model 1's output is Model 2's training data, cross-validation must wrap the full pipeline: for each fold, Model 1 re-runs selection on the training portion before Model 2 is trained and evaluated. Running CV on Model 2 alone would leak selection bias. Given only 20 TPs, leave-one-out cross-validation is used to maximize the training signal at each fold.
+
+
+One key thing to note is that since clustering methods are sensitive to data scale, the transformed feature values are scaled prior to being used for clustering.
+Decision trees are insensitive to scale and using scaled values would make the decision tree output difficult to interpret directly. Therefore features were not scaled for decision tree modeling. 
+
+#### Model 2 — Decision Tree (Classification)
+A Decision Tree classifier was trained on the curated dataset to distinguish manipulated securities from non-manipulated ones. Decision trees were the required model type because the business needed a transparent, rule-based classification process — fraud reviewers must be able to trace exactly which behavioral conditions triggered a flag, which a black-box model cannot provide. The 80/20 split (16 TPs for training, 4 for testing) was used throughout.
 
 **Additional experimentation** — An Isolation Forest model was also evaluated as an alternative approach, leveraging its strength in detecting anomalous securities without relying on labeled negatives.
 
