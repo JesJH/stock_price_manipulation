@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb.bak
+
+# Data — downloaded/generated files are not committed
+data/raw/
+data/processed/
+# data/external/ is tracked — contains hand-curated tp_tickers.csv (version-controlled source of truth)
+
+# Model artifacts
+outputs/models/
+outputs/plots/
+outputs/reports/
+
+# Environment
+.env
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
