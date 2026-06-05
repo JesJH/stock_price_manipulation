@@ -6,9 +6,9 @@ Use this file to resume work across devices. It captures design decisions, open 
 
 ## Project Summary
 
-ML pipeline to detect securities likely to be exploited in pump-and-dump schemes, replacing a rule-based fraud detection system at a brokerage. ~20 confirmed account takeover (ATO) incidents are the true positives. The model must surface risky securities with a ≥5-day lead time before fraudulent trades execute.
+Portfolio project replicating work built in a professional production environment. ML pipeline to detect securities likely to be exploited in pump-and-dump schemes, replacing a rule-based system. True positives are sourced from public SEC data as proxy labels — the production system used internally verified fraud cases.
 
-See README.md for full background, approach, and modeling design.
+See README.md for full background, approach, and modelling design.
 
 ---
 
@@ -107,12 +107,11 @@ This project contains **two separate models** addressing different sides of the 
 | Observation window | D-90 to D-5 | 5-day buffer = production lead time; 90 days to be validated (see open questions) |
 | TN D date | Same calendar window as matched TP | TNs are assigned to a TP centroid and share that TP's D date |
 | TN:TP ratio | 5:1 starting point; grid search to confirm | Chosen by judgment; optimal ratio should be validated empirically |
-| CV strategy | Leave-one-out | Only ~20 TPs; maximize training signal per fold |
+| CV strategy | Leave-one-out | Small TP set; maximise training signal per fold |
 | Feature scaling | Robust scaler (median/IQR) | Outlier-resistant; applied before Model 1 (centroid distances) only |
 | Decision tree (unscaled) | Features not scaled for DT | Preserve interpretability for fraud reviewers |
 | TN selection wrapping | Model 1 re-runs inside each CV fold | Prevents selection bias leakage into holdout |
 | Isolation Forest role | Anomaly score used as a **feature** input to DT | Adds unsupervised signal without replacing the interpretable classifier |
-| Baseline flag rate | ~50% of securities flagged by legacy rules | Used as comparison benchmark — new model should improve precision significantly |
 
 ---
 
@@ -149,8 +148,8 @@ This project contains **two separate models** addressing different sides of the 
 
 ## Measurement Plan (Offline / Portfolio)
 
-- **Primary:** Precision / Recall at optimized threshold via LOO-CV
-- **Baseline:** Legacy rule-based system flagged ~50% of securities — ML model must improve precision substantially at equal or better recall
+- **Primary:** Precision / Recall at optimised threshold via LOO-CV
+- **Baseline:** Legacy rule-based system had a high false-positive flag rate — ML model targets materially higher precision at comparable or better recall
 - **Secondary:** FP/FN cost-weighted score using placeholder 5:1 cost ratio
 - **Observation window sensitivity:** compare AUC-PR across window lengths (30–120 days)
 
