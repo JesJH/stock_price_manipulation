@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.data.downloader import MarketDataDownloader
 from src.data.sec_scraper import SECPumpDumpScraper
+from src.data.tn_universe import TNUniverseBuilder
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,9 +25,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=["sec", "yfinance", "all"],
+        choices=["sec", "yfinance", "tn", "all"],
         default="all",
         help="Which data to fetch (default: all)",
+    )
+    parser.add_argument(
+        "--tn-candidates",
+        type=int,
+        default=500,
+        help="Number of TN candidate tickers to sample (default: 500)",
+    )
+    parser.add_argument(
+        "--tn-candidates-file",
+        default="data/external/tn_candidates.csv",
+        help="Path to existing TN candidates CSV (skips rebuild if present)",
     )
     parser.add_argument("--start-date", default="2010-01-01", help="SEC search start date")
     parser.add_argument("--end-date", default="2023-12-31", help="SEC search end date")
@@ -85,6 +97,51 @@ def run_yfinance_download(args: argparse.Namespace) -> None:
         downloader.save_csv(meta_df, "tp_metadata.csv")
 
 
+def run_tn_download(args: argparse.Namespace) -> None:
+    import pandas as pd
+
+    tp_path = Path(args.tp_file)
+    if not tp_path.exists():
+        print(f"ERROR: TP tickers file not found at {tp_path}")
+        print("  Run --source yfinance first to generate TP data.")
+        sys.exit(1)
+
+    tp_cases = pd.read_csv(tp_path, parse_dates=["d_date"])
+    tp_tickers = tp_cases["ticker"].tolist()
+
+    # Build or load TN candidate list
+    tn_file = Path(args.tn_candidates_file)
+    if tn_file.exists():
+        print(f"\n=== TN Universe: loading existing candidates from {tn_file} ===")
+        tn_candidates = pd.read_csv(tn_file)
+    else:
+        print(f"\n=== TN Universe: building {args.tn_candidates} candidates ===")
+        builder = TNUniverseBuilder(
+            output_dir="data/external",
+            n_candidates=args.tn_candidates,
+        )
+        tn_candidates = builder.build(tp_tickers=tp_tickers, save=True)
+
+    tn_tickers = tn_candidates["ticker"].tolist()
+    print(f"  {len(tn_tickers)} TN candidates × {len(tp_cases)} TP windows")
+
+    downloader = MarketDataDownloader(output_dir="data/raw")
+    ohlcv_df, meta_df = downloader.download_tn_batch(
+        tn_tickers=tn_tickers,
+        tp_cases_df=tp_cases,
+        lookback_days=args.lookback_days,
+        buffer_days=args.buffer_days,
+    )
+
+    if not ohlcv_df.empty:
+        downloader.save_parquet(ohlcv_df, "tn_ohlcv.parquet")
+    else:
+        print("  Warning: no TN OHLCV data retrieved")
+
+    if not meta_df.empty:
+        downloader.save_csv(meta_df, "tn_metadata.csv")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -93,6 +150,9 @@ def main() -> None:
 
     if args.source in ("yfinance", "all"):
         run_yfinance_download(args)
+
+    if args.source in ("tn", "all"):
+        run_tn_download(args)
 
     print("\nDone.")
 

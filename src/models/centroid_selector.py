@@ -127,10 +127,24 @@ class CentroidSelector:
 
         selected_parts: list[pd.DataFrame] = []
         n_tp = len(self.tp_scaled_)
+        diag_rows: list[dict] = []
 
         for centroid_idx in range(n_tp):
             pool = working[working["_centroid_idx"] == centroid_idx]
+
+            diag: dict = {
+                "centroid_idx":   centroid_idx,
+                "n_candidates":   len(pool),
+                "mean_dist":      float(pool["_distance"].mean()) if not pool.empty else np.nan,
+                "median_dist":    float(pool["_distance"].median()) if not pool.empty else np.nan,
+                "min_dist":       float(pool["_distance"].min()) if not pool.empty else np.nan,
+                "max_dist":       float(pool["_distance"].max()) if not pool.empty else np.nan,
+            }
+
             if pool.empty:
+                diag["n_selected"] = 0
+                diag["coverage"]   = 0.0
+                diag_rows.append(diag)
                 continue
 
             if self.method == "random":
@@ -140,7 +154,12 @@ class CentroidSelector:
             else:
                 chunk = self._stratified_sample(pool, self.tn_tp_ratio)
 
+            diag["n_selected"] = len(chunk)
+            diag["coverage"]   = len(chunk) / self.tn_tp_ratio
+            diag_rows.append(diag)
             selected_parts.append(chunk)
+
+        self.diagnostics_ = diag_rows
 
         if not selected_parts:
             return pd.DataFrame()
@@ -170,6 +189,28 @@ class CentroidSelector:
         return pd.concat([tp_features, selected_tn], ignore_index=True).sample(
             frac=1, random_state=self.random_state
         )
+
+    def matching_report(self) -> pd.DataFrame:
+        """
+        Per-centroid matching quality statistics. Populated after select().
+
+        Columns
+        -------
+        centroid_idx  : index into the fitted TP centroids
+        n_candidates  : TN candidates assigned to this centroid
+        n_selected    : TNs actually selected after downsampling
+        coverage      : n_selected / tn_tp_ratio (1.0 = fully covered)
+        mean_dist     : mean Euclidean distance of candidates to centroid
+        median_dist   : median distance (robust to outliers)
+        min_dist      : closest TN (best match quality)
+        max_dist      : furthest TN selected
+        """
+        if not hasattr(self, "diagnostics_"):
+            raise RuntimeError("Call select() before matching_report().")
+        return pd.DataFrame(self.diagnostics_)[
+            ["centroid_idx", "n_candidates", "n_selected", "coverage",
+             "mean_dist", "median_dist", "min_dist", "max_dist"]
+        ]
 
     def centroid_pool_sizes(self, tn_candidates: pd.DataFrame) -> pd.Series:
         """

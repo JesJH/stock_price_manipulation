@@ -7,6 +7,7 @@ from src.features.feature_config import (
     CHANGE_WINDOWS,
     MARKET_CAP_BINS,
     MARKET_CAP_LABELS,
+    ORDER_FLOW_WINDOWS,
     PRICE_COLS,
     ROLLING_WINDOWS,
 )
@@ -39,7 +40,10 @@ class FeatureTransformer:
          high_minus_close    = (high - close) / close
          close_minus_low     = (close - low) / close
     4. Volume features      — N-day changes (raw + log-scaled) + rolling stats
-    5. Metadata encoding    — one-hot: country, currency, exchange; binned market cap
+    5. Order flow proxies   — OHLCV-derived buy/sell pressure approximations:
+         CLV (Close Location Value), OBV, A/D Line changes, CMF, MFI
+         See PARKING_LOT.md for discussion of limitations vs. true order flow.
+    6. Metadata encoding    — one-hot: country, currency, exchange; binned market cap
 
     Scaling note
     ------------
@@ -80,6 +84,7 @@ class FeatureTransformer:
                 continue
 
             features = self._compute_price_volume_features(grp)
+            features.update(self._compute_order_flow_features(grp))
             features["ticker"] = ticker
             features["d_date"] = pd.Timestamp(d_date)
 
@@ -132,6 +137,19 @@ class FeatureTransformer:
                 f"volume_roll{r}_sum",
                 f"volume_roll{r}_pos_count",
             ]
+
+        # --- Order flow proxies ---
+        # CLV rolling stats
+        for r in ROLLING_WINDOWS:
+            names += [f"clv_roll{r}_mean", f"clv_roll{r}_std", f"clv_roll{r}_pos_count"]
+
+        # OBV and A/D Line N-day changes
+        for n in CHANGE_WINDOWS:
+            names += [f"obv_chg_{n}d", f"ad_chg_{n}d"]
+
+        # CMF and MFI at fixed windows
+        for r in ORDER_FLOW_WINDOWS:
+            names += [f"cmf_{r}d", f"mfi_{r}d"]
 
         return names
 
@@ -206,6 +224,63 @@ class FeatureTransformer:
             features[f"volume_roll{r}_pos_count"] = (
                 (vol_daily_pct > 0).rolling(r, min_periods=1).sum().iloc[-1]
             )
+
+        return features
+
+    def _compute_order_flow_features(self, df: pd.DataFrame) -> dict:
+        """
+        OHLCV-derived proxies for buy/sell pressure.
+
+        True order flow (buy vs. sell volume) is not publicly available —
+        these are approximations based on where the close lands within the
+        day's high/low range. See PARKING_LOT.md for limitations.
+        """
+        features: dict = {}
+        df = df.copy()
+
+        hl_range = (df["high"] - df["low"]).replace(0, np.nan)
+
+        # Close Location Value: +1 = closed at high (buyers), -1 = closed at low (sellers)
+        clv = (2 * df["close"] - df["high"] - df["low"]) / hl_range
+
+        for r in ROLLING_WINDOWS:
+            min_p = max(2, r // 3)
+            roll  = clv.rolling(r, min_periods=min_p)
+            features[f"clv_roll{r}_mean"]      = roll.mean().iloc[-1]
+            features[f"clv_roll{r}_std"]        = roll.std().iloc[-1]
+            features[f"clv_roll{r}_pos_count"]  = (
+                (clv > 0).rolling(r, min_periods=1).sum().iloc[-1]
+            )
+
+        # On-Balance Volume: adds volume on up-days, subtracts on down-days
+        price_dir = np.sign(df["close"].diff(1)).fillna(0)
+        obv = (price_dir * df["volume"]).cumsum()
+        for n in CHANGE_WINDOWS:
+            features[f"obv_chg_{n}d"] = obv.diff(n).iloc[-1] if len(obv) > n else np.nan
+
+        # Accumulation/Distribution Line: cumulative CLV-weighted volume
+        ad_line = (clv.fillna(0) * df["volume"]).cumsum()
+        for n in CHANGE_WINDOWS:
+            features[f"ad_chg_{n}d"] = ad_line.diff(n).iloc[-1] if len(ad_line) > n else np.nan
+
+        # Chaikin Money Flow: net CLV-weighted volume fraction over window
+        clv_vol = clv.fillna(0) * df["volume"]
+        for r in ORDER_FLOW_WINDOWS:
+            min_p = max(2, r // 3)
+            num = clv_vol.rolling(r, min_periods=min_p).sum()
+            den = df["volume"].rolling(r, min_periods=min_p).sum().replace(0, np.nan)
+            features[f"cmf_{r}d"] = (num / den).iloc[-1]
+
+        # Money Flow Index: volume-weighted RSI-style oscillator (0–100)
+        typical_price = (df["high"] + df["low"] + df["close"]) / 3
+        raw_mf = typical_price * df["volume"]
+        tp_diff = typical_price.diff(1)
+        for r in ORDER_FLOW_WINDOWS:
+            min_p = max(2, r // 3)
+            pos_mf = raw_mf.where(tp_diff > 0, 0.0).rolling(r, min_periods=min_p).sum()
+            neg_mf = raw_mf.where(tp_diff <= 0, 0.0).rolling(r, min_periods=min_p).sum()
+            mfi = 100.0 - (100.0 / (1.0 + pos_mf / neg_mf.replace(0, np.nan)))
+            features[f"mfi_{r}d"] = mfi.iloc[-1]
 
         return features
 

@@ -134,14 +134,16 @@ This project contains **two separate models** addressing different sides of the 
 - [x] Data layer: `src/data/sec_scraper.py` + `src/data/downloader.py` + `src/data/preprocessor.py`
 - [x] Scripts: `scripts/download_data.py`
 - [x] Feature engineering: `src/features/feature_transformer.py` + `src/features/feature_config.py`
-- [x] Model 1: `src/models/centroid_selector.py` (random, distance_ranked, stratified)
+- [x] Model 1: `src/models/centroid_selector.py` (random, distance_ranked, stratified; + matching_report())
 - [x] Isolation Forest: `src/models/isolation_forest.py` (AnomalyScorer — IF score as feature)
-- [ ] Model 2: `src/models/classifier.py` (Decision Tree wrapper)
-- [ ] Training pipeline: `src/pipeline/training_pipeline.py` (LOO-CV wrapping M1 → IF → M2)
-- [ ] Threshold optimizer: `src/evaluation/threshold_optimizer.py`
-- [ ] Evaluation metrics: `src/evaluation/metrics.py` (FP/FN cost-aware)
+- [x] Model 2: `src/models/classifier.py` (FraudClassifier — Decision Tree wrapper)
+- [x] Training pipeline: `src/pipeline/training_pipeline.py` (LOO-CV wrapping M1 → IF → M2, leakage-safe)
+- [x] Threshold optimizer: `src/evaluation/threshold_optimizer.py`
+- [x] Evaluation metrics: `src/evaluation/metrics.py` (FP/FN cost-aware)
+- [x] TN universe: `src/data/tn_universe.py` (TNUniverseBuilder) + `downloader.download_tn_batch()`
+- [x] Order flow features: CLV, OBV, A/D Line, CMF, MFI added to `feature_transformer.py`
 - [ ] Inference pipeline: `src/pipeline/inference_pipeline.py`
-- [ ] CLI: `scripts/train_model.py`, `scripts/evaluate_model.py`
+- [x] CLI: `scripts/train_model.py`, `scripts/evaluate_model.py`, `scripts/download_data.py --source tn`
 - [x] Main notebook: `notebooks/pump_and_dump_detection.ipynb`
 
 ---

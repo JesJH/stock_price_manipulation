@@ -41,7 +41,7 @@ Count-based and streak-based features that capture the *consecutive* nature of c
 - `n_large_up_days` — count of days with daily return > threshold (e.g. 3%)
 - `n_large_intraday_reversals` — days where (high − close) / close exceeded a threshold (sell-into-strength pattern)
 
-Note: with ~20 TPs, keep the threshold list short and motivated by the P&D mechanism to avoid overfitting.
+Note: with a small TP set, keep the threshold list short and motivated by the P&D mechanism to avoid overfitting.
 
 **Status:** Discussed, not implemented. Add as `_compute_flag_features()` in `FeatureTransformer`.
 

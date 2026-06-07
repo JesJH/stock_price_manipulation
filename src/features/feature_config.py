@@ -29,3 +29,6 @@ MARKET_CAP_LABELS = ["micro", "small", "mid", "large", "mega"]
 
 # Minimum trading days required to include a ticker in the dataset
 MIN_TRADING_DAYS = 45  # roughly half of a 90-day calendar window
+
+# Windows for order flow proxy indicators (CMF, MFI)
+ORDER_FLOW_WINDOWS = [5, 10, 14, 20, 30]  # trading days
