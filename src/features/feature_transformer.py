@@ -42,7 +42,7 @@ class FeatureTransformer:
     4. Volume features      — N-day changes (raw + log-scaled) + rolling stats
     5. Order flow proxies   — OHLCV-derived buy/sell pressure approximations:
          CLV (Close Location Value), OBV, A/D Line changes, CMF, MFI
-         See PARKING_LOT.md for discussion of limitations vs. true order flow.
+         See docs/PARKING_LOT.md for discussion of limitations vs. true order flow.
     6. Metadata encoding    — one-hot: country, currency, exchange; binned market cap
 
     Scaling note
@@ -233,7 +233,7 @@ class FeatureTransformer:
 
         True order flow (buy vs. sell volume) is not publicly available —
         these are approximations based on where the close lands within the
-        day's high/low range. See PARKING_LOT.md for limitations.
+        day's high/low range. See docs/PARKING_LOT.md for limitations.
         """
         features: dict = {}
         df = df.copy()

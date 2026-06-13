@@ -1,174 +1,135 @@
 # Stock Price Manipulation Detection
 
-A machine learning pipeline to identify securities likely to be exploited in pump-and-dump schemes, replacing a rule-based fraud detection system with a model-driven approach that improves precision and reduces unnecessary trading blocks.
+An ML pipeline that identifies securities likely to be used in pump-and-dump fraud schemes, giving a fraud operations team time to place targeted blocks before fraudulent trades execute.
 
-> **About this portfolio project**
->
-> This project replicates the methodology of work built in a professional production environment. It is intended to showcase the end-to-end approach — problem framing, dataset construction, feature engineering, modelling, and evaluation. Details about the original production system, employer, and internal metrics are intentionally omitted.
+> **Portfolio project** — This replicates the methodology of work built in a professional production environment. Employer details and internal metrics are intentionally omitted. See [Caveats](#caveats) for data and scope limitations.
 
 ---
 
-## Background
+## What We're Trying to Achieve
 
-Financial institutions can be exposed to pump-and-dump schemes in which compromised customer accounts are used to artificially inflate the price of a target security. Once elevated, the fraudster — holding a pre-existing long position — sells at the inflated price, causing direct financial loss to the institution and its customers.
+In a pump-and-dump scheme, a fraudster artificially inflates a security's price through coordinated buying (often using compromised brokerage accounts), then sells their pre-existing position at the peak. The institution absorbs the loss.
 
-Legacy rule-based detection systems often rely on a small number of hard-coded thresholds and produce high false-positive rates, making them operationally unsustainable and leaving meaningful fraud exposure undetected.
+The goal is to **flag at-risk securities at least 5 days in advance** — enough lead time for a fraud analyst to review and block. The 5-day buffer is a hard operational constraint that shapes every modelling decision.
 
----
-
-## Business Goal
-
-Detect securities likely to be used in a pump-and-dump scheme **at least 5 days before the fraud event**, giving the fraud operations team time to review and place targeted blocks before fraudulent trades execute. The 5-day lead time is the key operational constraint shaping every modelling decision.
+The system replaces a legacy rule-based detector that flagged a very high proportion of all securities, producing an unworkable false-positive rate and leaving genuine fraud cases undetected.
 
 ---
 
-## Two-Model Architecture
+## Modelling Approach
 
-The broader system design addresses two different sides of the same fraud event. This repository implements the Security Model only.
+The pipeline has seven steps. Each addresses a specific challenge in building a fraud model on rare, noisy, imbalanced data.
 
-| Model | Question answered | Portfolio status |
-|---|---|---|
-| **Security Model** *(this repo)* | Will this security be used in a pump-and-dump scheme? | Implemented |
-| **Customer Model** *(not included)* | Is this customer's account at risk of being taken over for fraudulent trading? | Requires proprietary data — not replicated |
-
----
-
-## Data
-
-### On labelling
-
-No formal public body authoritatively labels a security as having been used in a pump-and-dump scheme. In the production system, the fraud operations team provided confirmed labels from internal investigation records — clean, timely, business-verified ground truth. For this portfolio version, SEC enforcement announcements and company 8-K disclosures are used as proxy labels: reasonable approximations, but not equivalent to internal labels.
-
-### True Positives — Confirmed Cases
-
-Sourced from SEC EDGAR via enforcement announcements and 8-K filings in which companies disclosed coordinated manipulation of their shares. Each confirmed case provides a ticker and a reference fraud date (D date) that anchors the observation window.
-
-### Price and Volume Data (OHLCV)
-
-Daily Open, High, Low, Close, Volume data pulled via `yfinance` for each confirmed case over its observation window. OHLCV is the only publicly available price data — true order flow (buy vs. sell volume splits) requires paid tick-level data and is not available here. Order flow *proxies* derived from OHLCV are used instead (see Feature Engineering).
-
-### Synthetic Data for Demonstration
-
-Sourcing and downloading real true negative data requires significant API time (~40–50 minutes for 500 candidates across 16 date windows). To allow the full pipeline to run end-to-end in seconds, `scripts/generate_demo_data.py` generates synthetic OHLCV series:
-
-- **TP series**: pump-and-dump pattern injected — quiet baseline → gradual price build-up + volume surge → sharp dump
-- **TN series**: geometric random walks with no directional pattern
-
-The synthetic data follows the same schema and file structure as real downloaded data. All modelling code runs identically on either. **The synthetic data is for demonstration only; the methodology and pipeline are designed for and validated against real securities data.**
-
----
-
-## Methodology
-
-Each step below addresses a specific problem in building a fraud detection model on rare, imbalanced, and noisy data.
-
-### Step 1 — Observation Window Construction
-
-**Problem:** The model must fire before the fraud occurs, not during it. Including data from the days immediately preceding the fraud event risks training on the most obvious manipulation signal, which may not be observable until it is too late to act.
-
-**Approach:** Features are built over a **D-90 to D-5** window — 90 trading days of price and volume behaviour ending 5 days before the fraud reference date. The 5-day buffer enforces the operational lead time requirement at training time, preventing the model from learning signals it would not have access to in production.
-
----
-
-### Step 2 — Feature Engineering
-
-**Problem:** Raw OHLCV price levels are uninformative across securities with different price scales, and a single point-in-time snapshot misses the temporal dynamics that characterise manipulation (sustained build-up, not just a high price).
-
-**Approach:** Each security's 90-day OHLCV series is transformed into a flat feature vector of statistical summaries:
-
-| Feature group | What it captures |
+| Step | What it achieves |
 |---|---|
-| N-day price changes (1/5/10/15/30/45/90d) | Rate of price movement at multiple horizons |
-| Rolling mean, std, positive-day count | Trend consistency and volatility over the window |
-| Intraday metrics (range, close-minus-open, etc.) | Daily buy/sell pressure within each session |
-| Volume changes and rolling stats | Accumulation and liquidity build-up |
-| Order flow proxies (CLV, OBV, CMF, MFI) | Approximations of buy vs. sell pressure from OHLCV |
-| Security metadata (exchange, market cap, country) | Structural context |
+| 1. Observation window | Locks in a D-90 to D-5 window — enforcing the lead-time constraint at training time |
+| 2. Feature engineering | Converts raw OHLCV series into statistical summaries that capture manipulation patterns |
+| 3. TN candidate sourcing | Builds a pool of "normal" securities from the same universe and time period as TPs |
+| 4. Centroid-based TN selection | Matches each TN to its nearest TP in feature space — so the model learns subtle distinctions, not trivial ones |
+| 5. Isolation Forest scoring | Adds an unsupervised anomaly signal as a feature, supplementing labelled training signal |
+| 6. Decision Tree classification | Produces an interpretable model — fraud reviewers can trace exactly what triggered a flag |
+| 7. Threshold optimisation | Tunes the operating point for the asymmetric FP/FN cost tradeoff in a fraud context |
 
-All transformations are encapsulated in `FeatureTransformer` — one call converts raw OHLCV into a model-ready row.
-
----
-
-### Step 3 — Centroid-Based True Negative Selection (Model 1)
-
-**Problem:** With severe class imbalance, randomly selecting true negatives gives the classifier an easy job — a large-cap S&P 500 stock will trivially separate from a micro-cap OTC penny stock on market cap alone. The model learns nothing useful about what distinguishes manipulated securities from similar, non-manipulated ones.
-
-**Approach:** Each confirmed TP security acts as a centroid. TN candidates are assigned to their nearest TP centroid by Euclidean distance in robust-scaled feature space. The classifier is then trained on TPs and the closest TNs — securities that *look similar to the TP* but were not manipulated. Three downsampling variants are compared:
-
-- **Random** — baseline, no assumption about match quality
-- **Distance-ranked** — selects the N closest TNs per centroid (hardest cases)
-- **Stratified-by-distance** — samples from near and far bins (balances hard and easy cases)
-
-Features are robust-scaled (median/IQR) for centroid distance computation only. The Decision Tree receives unscaled features to preserve interpretability.
+**→ See [docs/METHODOLOGY.md](docs/METHODOLOGY.md) for the full design rationale behind each step.**
 
 ---
 
-### Step 4 — Anomaly Scoring (Isolation Forest)
+## Project Structure
 
-**Problem:** The TP set is small, limiting the Decision Tree's ability to learn what "unusual" looks like from labelled examples alone.
-
-**Approach:** An Isolation Forest is trained on the TN candidate pool as a baseline of "normal" security behaviour. Its anomaly score — how isolated a security is relative to the normal distribution — is appended as a single additional feature. This adds an unsupervised signal about behavioural unusualness without replacing the interpretable classifier.
-
----
-
-### Step 5 — Decision Tree Classification (Model 2)
-
-**Problem:** A black-box model (gradient boosting, neural network) would likely outperform a decision tree on a larger dataset, but in a fraud context the model output must be explainable. Fraud reviewers need to understand exactly which conditions triggered a flag to make an informed block decision and to defend it to customers or regulators.
-
-**Approach:** A shallow Decision Tree (max depth 4) classifies each security as fraud risk or not. The tree is intentionally depth-limited to keep rules readable. Feature importances and the full tree structure are exposed in the notebook.
-
----
-
-### Step 6 — Leakage-Safe Leave-One-Out Cross-Validation
-
-**Problem:** With a small TP set, standard k-fold CV wastes training signal. More critically, naively splitting TN candidates independent of which TP they were matched to creates temporal leakage: a TN evaluated in TP_i's 2014 market window could appear as a training example when TP_i is the test case, allowing the model to implicitly learn the conditions of that specific period.
-
-**Approach:** LOO-CV holds out one TP per fold. Crucially, all TN candidates tagged with the held-out TP's D-date are *also* excluded from the training fold — they form the negative test set alongside the held-out TP. CentroidSelector and IsolationForest are re-fit from scratch in each fold using only training-fold data. This prevents both selection bias leakage and temporal leakage.
-
----
-
-### Step 7 — Threshold Optimisation
-
-**Problem:** Default 0.5 classification thresholds ignore the asymmetric cost of errors in a fraud context. A missed fraud case (false negative) causes direct financial loss; a false alarm (false positive) blocks a legitimate trade and harms customer experience. These costs are not equal.
-
-**Approach:** The classification threshold is grid-searched to minimise `FP × fp_cost + FN × fn_cost`, where the cost ratio reflects the relative business tolerance for each error type. The cost-optimal threshold from out-of-fold predictions is stored in the trained pipeline and used at inference time.
-
----
-
-## Results
-
-Results are produced by running the notebook end-to-end on synthetic data. See `notebooks/pump_and_dump_detection.ipynb` sections 11–13 for:
-
-- OOF score distributions (TP vs. TN separation)
-- Cost curve and precision/recall vs. threshold plots
-- Feature importance ranking and decision tree rules
-
-*Quantitative metrics on real data to be populated once real TN OHLCV is sourced.*
+```
+stock_price_manipulation/
+├── data/
+│   ├── raw/               # OHLCV parquet files (gitignored)
+│   ├── processed/         # Feature matrices (gitignored)
+│   └── external/          # tp_tickers.csv, tn_candidates.csv (tracked)
+├── src/
+│   ├── data/
+│   │   ├── downloader.py          # yfinance OHLCV + metadata fetcher
+│   │   ├── preprocessor.py        # country + history filters
+│   │   ├── sec_scraper.py         # SEC EDGAR TP label sourcing
+│   │   └── tn_universe.py         # TN candidate pool builder
+│   ├── features/
+│   │   ├── feature_transformer.py # OHLCV → flat feature vector
+│   │   └── feature_config.py      # window sizes, bins, constants
+│   ├── models/
+│   │   ├── centroid_selector.py   # TN downsampling (3 methods)
+│   │   ├── classifier.py          # Decision Tree wrapper
+│   │   └── isolation_forest.py    # Anomaly scorer
+│   ├── pipeline/
+│   │   └── training_pipeline.py   # LOO-CV: M1 → IF → M2, leakage-safe
+│   └── evaluation/
+│       ├── metrics.py             # Precision/recall + cost-weighted scoring
+│       └── threshold_optimizer.py # FP/FN cost threshold search
+├── notebooks/
+│   └── pump_and_dump_detection.ipynb   # End-to-end analysis + results
+├── scripts/
+│   ├── generate_demo_data.py      # Synthetic OHLCV for demonstration
+│   ├── download_data.py           # Fetch real TP/TN data from yfinance
+│   ├── train_model.py             # CLI training runner
+│   └── evaluate_model.py          # CLI evaluation runner
+└── outputs/
+    ├── models/                    # Saved pipeline artifacts
+    └── plots/                     # Evaluation charts
+```
 
 ---
 
-## Running the Project
+## Setup
+
+**Requirements:** Python 3.10+, packages in `requirements.txt`.
 
 ```bash
 git clone <repo>
 cd stock_price_manipulation
+
+# Option A — conda (recommended)
+conda create -n pump_dump python=3.13
+conda activate pump_dump
+
+# Option B — venv
+python -m venv .venv && source .venv/bin/activate
+
 pip install -r requirements.txt
+```
 
-# Generate synthetic demo data (runs in ~5 seconds)
+### Run the demo (synthetic data — recommended starting point)
+
+Generates synthetic OHLCV series and runs the full pipeline end-to-end in under a minute:
+
+```bash
 python scripts/generate_demo_data.py
-
-# Open the notebook — run all cells top to bottom
 jupyter notebook notebooks/pump_and_dump_detection.ipynb
 ```
 
-To run with real data instead of synthetic:
+### Run with real data
+
+Downloads real TN candidates from public NASDAQ listings via yfinance (~40–50 min):
+
 ```bash
-# Download real TN candidates from public listings + yfinance (~40-50 min)
 python scripts/download_data.py --source tn
+# Then run the notebook — it detects real data automatically
 ```
 
 ---
 
-## Skills & Tools
+## Caveats
 
-`Python` · `scikit-learn` · `pandas` · `numpy` · `yfinance` · `SEC EDGAR` · `Jupyter` · `Decision Tree` · `Isolation Forest` · `Centroid Clustering` · `Leave-One-Out CV` · `Machine Learning` · `Fraud Detection` · `Financial Services`
+**Synthetic demo data** — The default run uses generated price series (pump-and-dump patterns injected for TPs, random walks for TNs). This is for demonstration only. All modelling code runs identically on real downloaded data; the pipeline was designed and validated against real securities.
+
+**Proxy labels** — No formal public body labels a security as pump-and-dumped. SEC enforcement announcements and 8-K disclosures are used as proxies. In the production system, the fraud operations team provided directly verified labels from internal investigation records — a materially cleaner signal.
+
+**Proprietary features excluded** — The production model included customer transaction data (buy/sell volumes, account-level activity) as features. True order flow data requires paid tick-level feeds (Polygon, Bloomberg TAQ). This repo uses OHLCV-derived proxies (CLV, OBV, CMF, MFI) as approximations.
+
+**Country scope** — Analysis is restricted to US and Canadian equities. The original system applied no country filter. The restriction here is a data availability decision: SEC enforcement data is predominantly US-focused and yfinance coverage is most reliable for North American exchanges.
+
+**Customer Model not included** — A second model predicting which customer accounts are at risk of takeover (used to route fraudulent trades into the flagged securities) requires proprietary customer data and is not replicated here.
+
+---
+
+## Further Reading
+
+| Document | Contents |
+|---|---|
+| [docs/METHODOLOGY.md](docs/METHODOLOGY.md) | Full design rationale for each pipeline step |
+| [docs/PARKING_LOT.md](docs/PARKING_LOT.md) | Feature ideas, data limitations, and deferred decisions |
+| [CLAUDE.md](CLAUDE.md) | Development context and implementation status |
